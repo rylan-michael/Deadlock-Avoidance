@@ -79,6 +79,36 @@ def request_resource(process_list, available, request):
     return False
 
 
+def deadlock_recovery(process_list, available, request):
+    """Kills processes to return enough resource instances to fullfil request.
+
+    This implementation is very dumb. Can be greatly improved.
+    Returns:
+        terminated_processes: list of processes that must be terminated to
+                              fullfil the request. If resource can't be granted
+                              then return the empty array.
+    """
+    # https://stackoverflow.com/questions/986006/how-do-i-pass-a-variable-by-reference#986145
+    process_list = [x for x in process_list]
+    terminated_processes = []
+    
+    # Delete a process, record it, check if safe state
+    while True:
+        i = len(process_list)-1
+        terminated_processes.append(i)
+        process = process_list.pop()
+        available = add(process.allocation, available)
+        granted = request_resource(process_list, available, request)
+        if len(process_list) == 1:
+            return []
+        elif not granted:
+            pass
+        elif granted:
+            return terminated_processes
+    return terminated_processes
+    
+
+
 def take_user_input(process_list, available):
     print("If you'd like to exit reading input for this file at"
           + " anytime, enter 'c'.")
@@ -95,9 +125,16 @@ def take_user_input(process_list, available):
                 print("GRANTED")
             else:
                 print("NOT GRANTED")
+                terminated_processes = deadlock_recovery(process_list,
+                                       available, parsed_request)
+                if terminated_processes:
+                    print(f"Processes {terminated_processes} should be " +
+                          "terminated to grant the requested resources.")
+                else:
+                    print("No amount of processes can be terminated to grant " +
+                          "the requested resources.")
         except ValueError:
-            print("ERROR: Please enter a request without trailing"
-                      + " spaces.")
+            print("ERROR: Please submit a valid character sequence")
         except IOError:
             print("ERROR: Please enter a request with proper length.")
 

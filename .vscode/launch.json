@@ -10,7 +10,7 @@
             "request": "launch",
             "program": "${file}",
             "console": "integratedTerminal",
-            "args": ["sys_config.txt"]
+            "args": ["sys_config_task3.txt"]
         },
         {
             "name": "Python: Remote Attach",
