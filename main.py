@@ -1,148 +1,120 @@
-import pandas as pd
-import operator
-import random
+import argparse
+from process import Process, le, add, sub
 
 
-def read_file(filename):
-    """Parses txt file and extracts process information.
+def parse_file(filename):
+    """Parses text file and extracts system process information.
+    Params:
+        filename: name of the text file inluding the extension.
     Returns:
-        df: DataFrame of the process request matrix.
-        available_resources: a single list of available resources.
+        process_list: list of process objects.
+        available: list of available resource-type intances.
     """
-    data_set = {"Allocation": [], "Max": []}
+    raw_data_set = {"Allocation": [], "Max": []}
     available_resources = []
+    process_list = []
+
     f = open(filename, "r")
     header = ""
-    for x in f:
-        x = x.rstrip()
-        if ("Process" not in x) and (not x[0].isdigit()):
-            header = x
-
-        if x is not header:
+    for line in f:
+        line = line.rstrip()
+        if ("Process" not in line) and (not line[0].isdigit()):
+            header = line
+        if line is not header:
+            # Classify process lists into the following categories.
             if header == "Allocation":
-                # Remove 'Process #: ' from string
-                resources = x[11:].split()
-                process = [int(x) for x in resources]
-                data_set["Allocation"].append(process)
+                # Strip 'Process #: ' from string.
+                isolated_resources = line[11:].split()
+                resource_instance_count = [int(r) for r in isolated_resources]
+                raw_data_set["Allocation"].append(resource_instance_count)
             elif header == "Max":
-                resources = x[11:].split()
-                process = [int(x) for x in resources]
-                data_set["Max"].append(process)
+                isolated_resources = line[11:].split()
+                resource_instance_count = [int(r) for r in isolated_resources]
+                raw_data_set["Max"].append(resource_instance_count)
             elif header == "Available":
-                resources = x.split()
-                process = [int(x) for x in resources]
-                available_resources = process
+                isolated_resources = line.split()
+                available_resources = [int(r) for r in isolated_resources]
+    process_list = [p for p in map(Process, raw_data_set["Allocation"],
+                                   raw_data_set["Max"])]
+    return process_list, available_resources
 
-    df = pd.DataFrame(data=data_set)
-    return df, available_resources
 
+def is_safe(process_list, available_resources):
+    """Implements the safety portion of the Banker's algorithmn.
 
-def is_safe(process_request_matrix, available_resources):
-    """Determines whether the system can safely grant resources to processes.
-    Params:
-        process_request_matrix: DataFrame of all process resources.
-        available_resources: Array of the system's available reosuorces.
+    The Banker's algorithm for deadlock-avoidance (pg.331). Determines whether
+    the system ends up in a safe-state given a list of processes and the sys-
+    tem's available resources.
+    Returns:
+        is_safe: boolean specifying whether system is safe.
     """
-    df, available = process_request_matrix, available_resources
-    need = []
-    # Additional unpacking generalizations --
-    # https://docs.python.org/3/whatsnew/3.5.html#whatsnew-pep-448
-    for i in range(len(df)):
-        try:
-            allocation = df["Allocation"][i]
-            max_resources = df["Max"][i]
-            # Check if the process is trying to request too many resources.
-            if any(map(operator.gt, allocation, max_resources)):
-                raise Exception("Process is requesting more resources"
-                                + " than can be provided by the system.")
-            else:
-                need.append(list(map(operator.sub, df["Max"][i],
-                                     df["Allocation"][i])))
-        except Exception:
-            print("Process is requesting more resources"
-                  + " than can be provided by the system.")
-            return False
+    work = available_resources
+    finish = [False for i in range(len(process_list))]
 
-    work = available
-    finish = [False for i in range(len(df))]
-
-    iterations = 0
-    while False in finish:
-        for i in range(len(finish)):
-            if not finish[i] and all(map(operator.le, need[i], work)):
-                work = list(map(operator.add, work, df["Allocation"][i]))
+    # Worst-case performance m*n^2 operations. *n = len(finish)*
+    for _ in range(len(work) * (len(finish)**2)):
+        for i in range(len(process_list)):
+            process = process_list[i]
+            if not finish[i] and le(process.need, work):
+                work = add(work, process.allocation)
                 finish[i] = True
-            else:
-                if False not in finish:
-                    return True
-            iterations += 1
-        if iterations > 1000:
-            work = available
-            terminated = []
-            for i in range(1, len(finish)):
-                need = list(map(operator.sub, df["Max"][0], df["Allocation"][0]))
-                if all(map(operator.le, need, work)):
-                    print(f"Processes {terminated} should be terminated to grant the requested resources.")
-                else:
-                    terminated.append(i)
-                    work = list(map(operator.add, work, df["Allocation"][i]))
-            print("There are no amount of process you could kill that would"
-                  + " grant the resources your process requires.")
-            return False
+            elif False not in finish:
+                return True
+    return False
 
 
-def display_header(filename):
-    """Provides better user experience in the header prompts."""
-    colors = ["\x1b[0;30;44m", "\x1b[0;30;47m", "\x1b[0;30;43m",
-              "\x1b[0;30;46m"]
-    filename_disp = random.choice(colors) + filename + "\x1b[0m"
-    print("================================================================\n")
-    print("Processing the Request maxtrix file: ", filename_disp)
-    print("\n================================================================")
+def request_resource(process_list, available, request):
+    """Determines whether request can safely be granted."""
+    process = process_list[0]  # Assuming request for P0.
+    if not le(request, process.need):
+        print("Process has exceeded its maximum claim.")
+        return False
+    if le(request, available):
+        available = sub(available, request)
+        process.allocation = add(process.allocation, request)
+        process.need = sub(process.need, request)
+        process_list[0] = process
+        if is_safe(process_list, available):
+            return True
+    return False
 
 
-def takeUserInput(filename):
-    display_header(filename)
-    process_request_matrix, available_resources = read_file(filename)
-    s_state = is_safe(process_request_matrix, available_resources)
-    print("State after reading the file is: "
-          + ("Safe" if s_state else "Not Safe"))
+def take_user_input(process_list, available):
     print("If you'd like to exit reading input for this file at"
           + " anytime, enter 'c'.")
-    if s_state:
-        while True:
-            try:
-                process = input("Please enter a request vector: ")
-                # Handle 'exit' user input
-                if process == "c":
-                    return
-                parsed_request = [int(i) for i in process.split()]
-                if len(parsed_request) != len(available_resources):
-                    raise IOError
+    while True:
+        try:
+            p_input = input("Please enter a request vector (e.g. 1 0 0): ")
+            if p_input == "c":
+                return
+            parsed_request = [int(r) for r in p_input.split()]
+            if len(parsed_request) != len(available):
+                raise IOError
 
-                # Add user request to Process 0.
-                process_zero = process_request_matrix["Max"][0]
-                print(process_zero)
-                process_request_matrix["Max"][0] = [
-                    *map(operator.add, process_zero, parsed_request)]
-                is_s_safe = is_safe(process_request_matrix,
-                                    available_resources)
-                if is_s_safe:
-                    print("Safe")
-                else:
-                    process_request_matrix["Max"][0] = process_zero
-                    print("Not Granted, Max for Process 0 has been"
-                          + " reverted.")
-            except ValueError:
-                print("\t ERROR: Please enter a request without trailing"
+            if request_resource(process_list, available, parsed_request):
+                print("GRANTED")
+            else:
+                print("NOT GRANTED")
+        except ValueError:
+            print("ERROR: Please enter a request without trailing"
                       + " spaces.")
-            except IOError:
-                print("\t ERROR: Please enter a request with proper length.")
+        except IOError:
+            print("ERROR: Please enter a request with proper length.")
+
+def main():
+    # Setup user-friendly interface for command-line arguments.
+    parser = argparse.ArgumentParser(description="Processes the request " +
+                                     "vector from a specified text file.")
+    parser.add_argument("filename", type=str, help="include extension")
+    args = parser.parse_args()
+    process_list, available_resources = parse_file(args.filename)
+
+    if is_safe(process_list, available_resources):
+        print("SAFE")
     else:
-        print("Unable to take user requests because the input file has left"
-              + " the system in an unsafe state.")
+        print("NOT SAFE")
+
+    take_user_input(process_list, available_resources)
 
 
-takeUserInput("sys_config.txt")
-# takeUserInput("sys_config 2.txt")
-# takeUserInput("sys_config_task3.txt")
+main()
